@@ -26,7 +26,7 @@ from utils.general import (
     get_latest_run, check_git_status, check_file, increment_dir, print_mutation, plot_evolution)
 from utils.google_utils import attempt_download
 from utils.torch_utils import init_seeds, ModelEMA, select_device, intersect_dicts
-
+from utils.class_balanced import class_balanced_weights
 
 def train(hyp, opt, device, tb_writer=None):
     print(f'Hyperparameters {hyp}')
@@ -168,6 +168,9 @@ def train(hyp, opt, device, tb_writer=None):
     model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device)  # attach class weights
     model.names = names
 
+    # Calculate the weights for class balanced loss and attach them to the model
+    model.class_balanced_weights = class_balanced_weights(dataset.labels, nc).to(device)
+
     # Class frequency
     if rank in [-1, 0]:
         labels = np.concatenate(dataset.labels, 0)
@@ -231,6 +234,19 @@ def train(hyp, opt, device, tb_writer=None):
             ni = i + nb * epoch  # number integrated batches (since train start)
             imgs = imgs.to(device, non_blocking=True).float() / 255.0  # uint8 to float32, 0-255 to 0.0-1.0
 
+            # Assign class balanced weights to the targets
+            target_classes = targets[:,1].clone().detach()
+            labels_one_hot = F.one_hot(target_classes.to(torch.int64), nc).float()
+
+            #weights = torch.tensor(model.class_balanced_weights).float()
+            weights = model.class_balanced_weights.clone().detach().float()
+            weights = weights.unsqueeze(0)
+            weights = weights.repeat(labels_one_hot.shape[0],1) * labels_one_hot.to(device)
+            weights = weights.sum(1)
+            weights = weights.unsqueeze(1)
+            weights = weights.repeat(1,nc)
+
+
             # Warmup
             if ni <= nw:
                 xi = [0, nw]  # x interp
@@ -257,7 +273,7 @@ def train(hyp, opt, device, tb_writer=None):
                 #pred = model(imgs.to(memory_format=torch.channels_last))
 
                 # Loss
-                loss, loss_items = compute_loss(pred, targets.to(device), model)  # scaled by batch_size
+                loss, loss_items = compute_loss(pred, targets.to(device), model, weights, labels_one_hot)  # scaled by batch_size
                 if rank != -1:
                     loss *= opt.world_size  # gradient averaged between devices in DDP mode
                 # if not torch.isfinite(loss):
@@ -300,7 +316,7 @@ def train(hyp, opt, device, tb_writer=None):
         if rank in [-1, 0]:
             # mAP
             if ema is not None:
-                ema.update_attr(model, include=['yaml', 'nc', 'hyp', 'gr', 'names', 'stride'])
+                ema.update_attr(model, include=['yaml', 'nc', 'hyp', 'gr', 'names', 'stride','class_balanced_weights'])
             final_epoch = epoch + 1 == epochs
             if not opt.notest or final_epoch:  # Calculate mAP
                 results, maps, times = test.test(opt.data,

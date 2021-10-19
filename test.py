@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 
 import numpy as np
+import torch.nn.functional as F
 import torch
 import yaml
 from tqdm import tqdm
@@ -92,6 +93,19 @@ def test(data,
         nb, _, height, width = img.shape  # batch size, channels, height, width
         whwh = torch.Tensor([width, height, width, height]).to(device)
 
+        # Assign class balanced weights to the targets 
+        target_classes = targets[:,1].clone().detach()
+        labels_one_hot = F.one_hot(target_classes.to(torch.int64), nc).float()
+
+        #weights = torch.tensor(model.class_balanced_weights).float()
+        weights = model.class_balanced_weights.clone().detach().float()
+        weights = weights.unsqueeze(0)
+        weights = weights.repeat(labels_one_hot.shape[0],1) * labels_one_hot.to(device)
+        weights = weights.sum(1)
+        weights = weights.unsqueeze(1)
+        weights = weights.repeat(1,nc)
+
+
         # Disable gradients
         with torch.no_grad():
             # Run model
@@ -102,7 +116,7 @@ def test(data,
 
             # Compute loss
             if training:  # if model has loss hyperparameters
-                loss += compute_loss([x.float() for x in train_out], targets, model)[1][:3]  # GIoU, obj, cls
+                loss += compute_loss([x.float() for x in train_out], targets, model, weights, labels_one_hot)[1][:3]  # GIoU, obj, cls
 
             # Run NMS
             t = time_synchronized()
