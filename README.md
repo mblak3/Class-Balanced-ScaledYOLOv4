@@ -140,6 +140,12 @@ python -m torch.distributed.launch --nproc_per_node 4 train.py --batch-size 64 -
     year      = {2021},
     pages     = {13029-13038}
 }
+@inproceedings{cui2019classbalancedloss,
+  title={Class-Balanced Loss Based on Effective Number of Samples},
+  author={Cui, Yin and Jia, Menglin and Lin, Tsung-Yi and Song, Yang and Belongie, Serge},
+  booktitle={CVPR},
+  year={2019}
+}
 ```
 
 ## Acknowledgements
